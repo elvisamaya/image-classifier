@@ -1,3 +1,11 @@
+"""
+CIFAR-10 classifier (PyTorch)
+
+Simple CNN trained from scratch on CIFAR-10.
+Uses some basic augmentation + dropout + batch norm.
+Tracks train/val metrics and saves best checkpoint.
+"""
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -9,6 +17,9 @@ import numpy as np
 from pathlib import Path
 
 
+# --------------------------
+# config
+# --------------------------
 batch_size = 64
 lr = 1e-3
 epochs = 15
@@ -25,9 +36,13 @@ classes = (
 print("device:", device)
 
 
+# --------------------------
+# data
+# --------------------------
 train_transform = transforms.Compose([
     transforms.RandomCrop(32, padding=4),
     transforms.RandomHorizontalFlip(),
+    transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15),
     transforms.ToTensor(),
     transforms.Normalize(
         (0.4914, 0.4822, 0.4465),
@@ -44,23 +59,22 @@ test_transform = transforms.Compose([
 ])
 
 train_data = torchvision.datasets.CIFAR10(
-    root="./data",
-    train=True,
-    download=True,
-    transform=train_transform
+    root="./data", train=True, download=True, transform=train_transform
 )
 
 test_data = torchvision.datasets.CIFAR10(
-    root="./data",
-    train=False,
-    download=True,
-    transform=test_transform
+    root="./data", train=False, download=True, transform=test_transform
 )
 
 train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
+print("train:", len(train_data), "test:", len(test_data))
 
+
+# --------------------------
+# model
+# --------------------------
 class SmallCifarNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -87,7 +101,7 @@ class SmallCifarNet(nn.Module):
             nn.Linear(128 * 4 * 4, 256),
             nn.ReLU(),
             nn.Dropout(0.45),
-            nn.Linear(256, 10)
+            nn.Linear(256, 10),
         )
 
     def forward(self, x):
@@ -96,6 +110,12 @@ class SmallCifarNet(nn.Module):
 
 
 model = SmallCifarNet().to(device)
+print("params:", sum(p.numel() for p in model.parameters()))
+
+
+# --------------------------
+# training setup
+# --------------------------
 criterion = nn.CrossEntropyLoss()
 
 optimizer = optim.Adam(
@@ -104,15 +124,12 @@ optimizer = optim.Adam(
     weight_decay=weight_decay
 )
 
-scheduler = optim.lr_scheduler.StepLR(
-    optimizer,
-    step_size=5,
-    gamma=0.5
-)
-
-print("params:", sum(p.numel() for p in model.parameters()))
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
 
+# --------------------------
+# helpers
+# --------------------------
 def train_one_epoch():
     model.train()
 
@@ -121,16 +138,18 @@ def train_one_epoch():
     total = 0
 
     for x, y in train_loader:
-        x = x.to(device)
-        y = y.to(device)
+        x, y = x.to(device), y.to(device)
 
         optimizer.zero_grad()
+
         out = model(x)
         loss = criterion(out, y)
+
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
+
         preds = out.argmax(dim=1)
         total += y.size(0)
         correct += (preds == y).sum().item()
@@ -147,13 +166,13 @@ def evaluate():
 
     with torch.no_grad():
         for x, y in test_loader:
-            x = x.to(device)
-            y = y.to(device)
+            x, y = x.to(device), y.to(device)
 
             out = model(x)
             loss = criterion(out, y)
 
             total_loss += loss.item()
+
             preds = out.argmax(dim=1)
             total += y.size(0)
             correct += (preds == y).sum().item()
@@ -169,20 +188,18 @@ def unnormalize(img):
     return np.clip(img, 0, 1)
 
 
-history = {
-    "train_loss": [],
-    "train_acc": [],
-    "val_loss": [],
-    "val_acc": []
-}
-
+# --------------------------
+# training loop
+# --------------------------
+history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": []}
 best_val = 0
 
 print("\n--- training ---")
 
-for epoch in range(1, epochs + 1):
+for e in range(1, epochs + 1):
     train_loss, train_acc = train_one_epoch()
     val_loss, val_acc = evaluate()
+
     scheduler.step()
 
     history["train_loss"].append(train_loss)
@@ -190,46 +207,51 @@ for epoch in range(1, epochs + 1):
     history["val_loss"].append(val_loss)
     history["val_acc"].append(val_acc)
 
-    print(
-        f"{epoch:02d} | "
-        f"train {train_loss:.4f} {train_acc:.2f}% | "
-        f"val {val_loss:.4f} {val_acc:.2f}%"
-    )
+    print(f"{e:2d} | {train_loss:.3f} {train_acc:.2f}% | {val_loss:.3f} {val_acc:.2f}%")
 
     if val_acc > best_val:
         best_val = val_acc
         torch.save(model.state_dict(), checkpoint_path)
 
 print("best val:", best_val)
-print("saved:", checkpoint_path)
 
 
+# --------------------------
+# nicer plots
+# --------------------------
 def plot_curves():
     ep = np.arange(1, len(history["train_loss"]) + 1)
 
-    plt.figure(figsize=(12, 5))
+    fig = plt.figure(figsize=(12, 5))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
 
-    plt.subplot(1, 2, 1)
-    plt.plot(ep, history["train_loss"], label="train")
-    plt.plot(ep, history["val_loss"], label="val")
-    plt.title("loss")
-    plt.xlabel("epoch")
-    plt.legend()
-    plt.grid(alpha=0.3)
+    ax1.plot(ep, history["train_loss"], marker="o", linewidth=2, label="train")
+    ax1.plot(ep, history["val_loss"], marker="o", linewidth=2, label="val")
+    ax1.set_title("loss")
+    ax1.set_xlabel("epoch")
+    ax1.grid(alpha=0.3)
+    ax1.legend(frameon=False)
+    ax1.spines["top"].set_visible(False)
+    ax1.spines["right"].set_visible(False)
 
-    plt.subplot(1, 2, 2)
-    plt.plot(ep, history["train_acc"], label="train")
-    plt.plot(ep, history["val_acc"], label="val")
-    plt.title("accuracy")
-    plt.xlabel("epoch")
-    plt.legend()
-    plt.grid(alpha=0.3)
+    ax2.plot(ep, history["train_acc"], marker="o", linewidth=2, label="train")
+    ax2.plot(ep, history["val_acc"], marker="o", linewidth=2, label="val")
+    ax2.set_title("accuracy")
+    ax2.set_xlabel("epoch")
+    ax2.grid(alpha=0.3)
+    ax2.legend(frameon=False)
+    ax2.spines["top"].set_visible(False)
+    ax2.spines["right"].set_visible(False)
 
     plt.tight_layout()
-    plt.savefig("training_curves.png", dpi=180)
+    plt.savefig("training_curves.png", dpi=200)
     plt.show()
 
 
+# --------------------------
+# predictions
+# --------------------------
 def show_preds(n=8):
     if Path(checkpoint_path).exists():
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
@@ -250,10 +272,10 @@ def show_preds(n=8):
 
         axes[i].imshow(unnormalize(img))
         axes[i].axis("off")
-        axes[i].set_title(f"pred: {classes[pred]}\ntrue: {classes[label]}", fontsize=9)
+        axes[i].set_title(f"{classes[pred]} / {classes[label]}", fontsize=10)
 
     plt.tight_layout()
-    plt.savefig("predictions.png", dpi=180)
+    plt.savefig("predictions.png", dpi=200)
     plt.show()
 
 
