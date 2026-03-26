@@ -46,32 +46,44 @@ train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
 
-class BaselineCNN(nn.Module):
+class SmallCifarNet(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.net = nn.Sequential(
-            nn.Conv2d(3, 16, 3, padding=1),
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, 3, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.MaxPool2d(2),
 
-            nn.Conv2d(16, 32, 3, padding=1),
+            nn.Conv2d(32, 64, 3, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(2),
 
+            nn.Conv2d(64, 128, 3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+        )
+
+        self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(32 * 8 * 8, 128),
+            nn.Linear(128 * 4 * 4, 256),
             nn.ReLU(),
-            nn.Linear(128, 10)
+            nn.Linear(256, 10)
         )
 
     def forward(self, x):
-        return self.net(x)
+        x = self.features(x)
+        return self.classifier(x)
 
 
-model = BaselineCNN().to(device)
+model = SmallCifarNet().to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=lr)
+
+print("params:", sum(p.numel() for p in model.parameters()))
 
 
 def train_one_epoch():
