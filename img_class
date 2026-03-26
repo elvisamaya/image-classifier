@@ -8,7 +8,8 @@ from torch.utils.data import DataLoader
 
 batch_size = 64
 lr = 1e-3
-epochs = 10
+epochs = 15
+weight_decay = 1e-4
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -20,7 +21,17 @@ classes = (
 print("device:", device)
 
 
-transform = transforms.Compose([
+train_transform = transforms.Compose([
+    transforms.RandomCrop(32, padding=4),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        (0.4914, 0.4822, 0.4465),
+        (0.2023, 0.1994, 0.2010)
+    ),
+])
+
+test_transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(
         (0.4914, 0.4822, 0.4465),
@@ -32,14 +43,14 @@ train_data = torchvision.datasets.CIFAR10(
     root="./data",
     train=True,
     download=True,
-    transform=transform
+    transform=train_transform
 )
 
 test_data = torchvision.datasets.CIFAR10(
     root="./data",
     train=False,
     download=True,
-    transform=transform
+    transform=test_transform
 )
 
 train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
@@ -71,6 +82,7 @@ class SmallCifarNet(nn.Module):
             nn.Flatten(),
             nn.Linear(128 * 4 * 4, 256),
             nn.ReLU(),
+            nn.Dropout(0.45),
             nn.Linear(256, 10)
         )
 
@@ -81,7 +93,18 @@ class SmallCifarNet(nn.Module):
 
 model = SmallCifarNet().to(device)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=lr)
+
+optimizer = optim.Adam(
+    model.parameters(),
+    lr=lr,
+    weight_decay=weight_decay
+)
+
+scheduler = optim.lr_scheduler.StepLR(
+    optimizer,
+    step_size=5,
+    gamma=0.5
+)
 
 print("params:", sum(p.numel() for p in model.parameters()))
 
@@ -137,6 +160,7 @@ def evaluate():
 for epoch in range(1, epochs + 1):
     train_loss, train_acc = train_one_epoch()
     val_loss, val_acc = evaluate()
+    scheduler.step()
 
     print(
         f"epoch {epoch:02d} | "
