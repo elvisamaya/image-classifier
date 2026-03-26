@@ -4,6 +4,9 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+import numpy as np
+from pathlib import Path
 
 
 batch_size = 64
@@ -158,6 +161,14 @@ def evaluate():
     return total_loss / len(test_loader), 100 * correct / total
 
 
+def unnormalize(img):
+    mean = np.array([0.4914, 0.4822, 0.4465])
+    std = np.array([0.2023, 0.1994, 0.2010])
+    img = img.cpu().numpy().transpose(1, 2, 0)
+    img = std * img + mean
+    return np.clip(img, 0, 1)
+
+
 history = {
     "train_loss": [],
     "train_acc": [],
@@ -191,3 +202,60 @@ for epoch in range(1, epochs + 1):
 
 print("best val:", best_val)
 print("saved:", checkpoint_path)
+
+
+def plot_curves():
+    ep = np.arange(1, len(history["train_loss"]) + 1)
+
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(ep, history["train_loss"], label="train")
+    plt.plot(ep, history["val_loss"], label="val")
+    plt.title("loss")
+    plt.xlabel("epoch")
+    plt.legend()
+    plt.grid(alpha=0.3)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(ep, history["train_acc"], label="train")
+    plt.plot(ep, history["val_acc"], label="val")
+    plt.title("accuracy")
+    plt.xlabel("epoch")
+    plt.legend()
+    plt.grid(alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig("training_curves.png", dpi=180)
+    plt.show()
+
+
+def show_preds(n=8):
+    if Path(checkpoint_path).exists():
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+
+    model.eval()
+
+    idxs = np.random.choice(len(test_data), n, replace=False)
+
+    fig, axes = plt.subplots(2, 4, figsize=(12, 6))
+    axes = axes.flatten()
+
+    for i, idx in enumerate(idxs):
+        img, label = test_data[idx]
+
+        with torch.no_grad():
+            out = model(img.unsqueeze(0).to(device))
+            pred = out.argmax(dim=1).item()
+
+        axes[i].imshow(unnormalize(img))
+        axes[i].axis("off")
+        axes[i].set_title(f"pred: {classes[pred]}\ntrue: {classes[label]}", fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig("predictions.png", dpi=180)
+    plt.show()
+
+
+plot_curves()
+show_preds()
